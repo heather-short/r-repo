@@ -1,0 +1,207 @@
+---
+title: How to download data from CDEC
+output: html_notebook
+author: Heather Short
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, load packages}
+
+# install packages if necessary
+#install.packages("CDECRetrieve")
+
+# load packages
+library(CDECRetrieve)
+library(tidyverse)
+
+```
+
+# The code below (lines 24 to 110) explains how to download CDEC data one sensor and station at a time.
+
+### Jump to line 115 to download multiple sensors and stations at once
+
+# --------------------------------------------------------------------------------------------------------------------
+
+# What are the start and end dates you are interested in?
+```{r, assign dates}
+
+start_date = "2024-12-01"
+  
+end_date = "2025-06-01"
+
+```
+
+# What station are you interested in?
+```{r, assign station ID}
+
+station_id = "FPT" # Freeport
+
+```
+
+# What sensors are you interested in?
+```{r, assign sensor codes}
+
+# 20 = discharge
+# 21 = velocity
+# 25 = temperature
+# 221 = turbidity
+
+sensor_id = "25" # temperature
+
+```
+
+# This chunk creates the function that will download CDEC data and bind it into a dataframe. 
+### Do not edit this chunk.
+```{r, CDEC Retrieve function}
+
+get_cdec_data <- function(station, sensor, start_date, end_date) {
+  
+  df <- cdec_query(station = station, 
+                   sensor = sensor,
+                   start_date = start_date, 
+                   end_date = end_date, 
+                   dur_code = "E") %>% 
+    
+            mutate(station_id = station,
+                   sensor_id = sensor)
+  
+           return(df)
+} # end function
+```
+
+# Use the get_cdec_data function.
+```{r, create dataframe}
+
+# if you edited the first 3 chunks and assigned values to station_id, sensor_id, start_date, and end_date, 
+# you should not need to edit this chunk 
+
+downloaded_df = get_cdec_data(station_id, sensor_id, start_date, end_date)
+
+```
+
+# Clean up the new dataframe and add more information.
+```{r, clean up}
+
+clean_df = downloaded_df %>% 
+  mutate(downloaded_from = "CDEC", # makes a new column to show that this data was downloaded from CDEC
+         value = parameter_value, # copies the parameter_value column to "value" column
+         
+         # make sure to edit these to reflect the sensor_id you chose
+         value_type = "temperature", 
+         units = "deg C", 
+         
+         # edit this to reflect the station_id you chose
+         location = "Freeport", 
+         
+         # edit this to reflect the dates you chose
+         water_year = "2025") %>% 
+  
+  # selects and reorders columns
+  select(downloaded_from, location_id, location, water_year, datetime, value, value_type, units) 
+
+```
+
+# Create a test plot
+```{r, test plot}
+
+ggplot(clean_df, aes(x = datetime, y = value, color = value_type)) + 
+  geom_line(linewidth = 1.2)
+
+```
+
+# -------------------------------------------------------------------------------------------------------------------
+
+# # The code below explains how to download multiple sensors and stations at a time.
+
+# What are the start and end dates you are interested in?
+```{r, assign dates}
+
+start_date = "2024-12-01"
+  
+end_date = "2025-06-01"
+
+```
+
+
+# What stations and sensors are you interested in?
+```{r, assign stations and sensors}
+
+# create a lookup table for the stations and sensors of interest
+stations_sensors = tibble::tribble(~station_id, ~sensor_id,
+                                   "FPT",       "20", 
+                                   "FPT",       "25", 
+                                   "GES",       "20", 
+                                   "GES",       "25") 
+
+# create a lookup table to give the sensor_id meaning
+sensor_lookup = tibble::tribble(~sensor_id, ~value_type,  ~units,
+                                "20",      "Discharge",   "cfs",
+                                "25",      "Temperature", "deg C")
+
+# create a lookup table to give the station_id meaning
+station_lookup = tibble::tribble(~station_id, ~location,
+                                 "FPT",       "Freeport", 
+                                 "GES",       "Georgiana Slough")
+
+```
+
+# This chunk creates the function that will download CDEC data and bind it into a dataframe. 
+### Do not edit this chunk.
+```{r, CDEC Retrieve function}
+
+get_cdec_data <- function(station, sensor, start_date, end_date) {
+  
+  df <- cdec_query(station = station, 
+                   sensor = sensor,
+                   start_date = start_date, 
+                   end_date = end_date, 
+                   dur_code = "E") %>% 
+    
+            mutate(station_id = station,
+                   sensor_id = sensor)
+  
+           return(df)
+} # end function
+```
+
+```{r, create dataframe}
+
+downloaded_df_2 = stations_sensors %>% 
+  mutate(data = map2(station_id, sensor_id, 
+                     ~ get_cdec_data(.x, .y, start_date, end_date))) %>% 
+  select(-station_id, -sensor_id) %>% 
+  unnest(data)
+
+```
+
+# Clean up the new dataframe and add more information.
+```{r, clean up}
+
+# bind dataframe with lookup tables
+downloaded_df_2 = downloaded_df_2 %>% 
+  left_join(sensor_lookup, by = "sensor_id") %>% 
+  left_join(station_lookup, by = "station_id")
+
+# clean up df
+clean_df_2 = downloaded_df_2 %>% 
+  mutate(downloaded_from = "CDEC", # makes a new column to show that this data was downloaded from CDEC
+         value = parameter_value, # copies the parameter_value column to "value" column
+         
+         # edit this to reflect the dates you chose
+         water_year = "2025") %>% 
+  
+  # selects and reorders columns
+  select(downloaded_from, location_id, location, water_year, datetime, value, value_type, units) 
+
+```
+
+# Create a test plot
+```{r, test plot}
+
+ggplot(clean_df_2, aes(x = datetime, y = value, color = value_type)) + 
+  facet_grid(rows = vars(value_type), cols = vars(location), scales = "free_y") +
+  geom_line(linewidth = 1.2)
+
+```
+
